@@ -9,6 +9,13 @@
 // through New. Token persistence is delegated to a consumer-supplied TokenStore
 // (a ready-made PostgreSQL one lives in the postgres subpackage).
 //
+// Product services (Calendar, Gmail, Contacts) live in subpackages and each
+// accept a Connector — typically the *Client built here:
+//
+//	gwClient := gworkspace.New(store, cfg)
+//	calSvc   := calendar.New(gwClient)
+//	gmailSvc := gmail.New(gwClient)
+//
 // The package has zero knowledge of any application: an owner ID is whatever
 // opaque string the consumer uses to identify a human, and nothing here depends
 // on the meaning behind it.
@@ -23,7 +30,6 @@ import (
 	calendar "google.golang.org/api/calendar/v3"
 	gmail "google.golang.org/api/gmail/v1"
 	"google.golang.org/api/googleapi"
-	"google.golang.org/api/option"
 	people "google.golang.org/api/people/v1"
 )
 
@@ -60,6 +66,13 @@ var RequiredScopes = []string{
 	gmail.GmailModifyScope,
 	gmail.GmailSendScope,
 	people.ContactsScope,
+}
+
+// Connector is the narrow credential interface that product subpackages need.
+// *Client implements it. Consumers can also satisfy it in tests without a real
+// token store.
+type Connector interface {
+	TokenSourceFor(ctx context.Context, owner string) (oauth2.TokenSource, error)
 }
 
 // TokenStore persists Google Workspace OAuth refresh tokens on behalf of a user.
@@ -135,10 +148,11 @@ func (c *Client) Connect(ctx context.Context, owner, code string) error {
 	return c.tokenStore.SaveRefreshToken(ctx, owner, refreshToken)
 }
 
-// tokenSourceFor resolves the owner's refresh token and turns it into an
+// TokenSourceFor resolves the owner's refresh token and returns an
 // oauth2.TokenSource that refreshes access tokens on demand. It returns
 // ErrNotConnected (from the store) when the owner has not connected.
-func (c *Client) tokenSourceFor(ctx context.Context, owner string) (oauth2.TokenSource, error) {
+// TokenSourceFor implements Connector.
+func (c *Client) TokenSourceFor(ctx context.Context, owner string) (oauth2.TokenSource, error) {
 	refreshToken, err := c.tokenStore.GetRefreshToken(ctx, owner)
 	if err != nil {
 		return nil, fmt.Errorf("get token for owner %s: %w", owner, err)
@@ -146,36 +160,11 @@ func (c *Client) tokenSourceFor(ctx context.Context, owner string) (oauth2.Token
 	return c.oauth2Cfg.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken}), nil
 }
 
-func (c *Client) calendarFor(ctx context.Context, owner string) (*calendar.Service, error) {
-	ts, err := c.tokenSourceFor(ctx, owner)
-	if err != nil {
-		return nil, err
-	}
-	return calendar.NewService(ctx, option.WithTokenSource(ts))
-}
-
-func (c *Client) gmailFor(ctx context.Context, owner string) (*gmail.Service, error) {
-	ts, err := c.tokenSourceFor(ctx, owner)
-	if err != nil {
-		return nil, err
-	}
-	return gmail.NewService(ctx, option.WithTokenSource(ts))
-}
-
-func (c *Client) peopleFor(ctx context.Context, owner string) (*people.Service, error) {
-	ts, err := c.tokenSourceFor(ctx, owner)
-	if err != nil {
-		return nil, err
-	}
-	return people.NewService(ctx, option.WithTokenSource(ts))
-}
-
-// wrapError annotates err with the operation name and, when it carries a
+// WrapError annotates err with the operation name and, when it carries a
 // recognizable Google API error, joins one of the package sentinels so callers
-// can branch with errors.Is. The original error stays in the chain either way.
-// It returns nil when err is nil so call sites can wrap unconditionally. Every
-// feature routes its API errors through here.
-func wrapError(op string, err error) error {
+// can branch with errors.Is. Returns nil when err is nil. Product subpackages
+// route their API errors through here.
+func WrapError(op string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -186,8 +175,7 @@ func wrapError(op string, err error) error {
 }
 
 // sentinelFor maps a Google API error to a package sentinel, or returns nil when
-// none applies. Additional sentinels (not found, etc.) are deferred until a
-// consumer needs to branch on them.
+// none applies.
 func sentinelFor(err error) error {
 	var apiErr *googleapi.Error
 	if !errors.As(err, &apiErr) {

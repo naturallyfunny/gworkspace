@@ -28,50 +28,25 @@ func (f *fakeStore) SaveRefreshToken(ctx context.Context, owner, refreshToken st
 	return nil
 }
 
-// When the store reports the user is not connected, every feature call must
-// surface ErrNotConnected before touching the network, so consumers can route
-// into the login flow. All methods resolve the token through the same
-// tokenSourceFor path, so this covers every public capability.
-func TestNotConnectedPropagates(t *testing.T) {
+// TokenSourceFor must surface ErrNotConnected from the store so product
+// subpackages (calendar, gmail, contact) can propagate it to callers without
+// touching the network.
+func TestTokenSourceForNotConnected(t *testing.T) {
 	c := New(&fakeStore{err: ErrNotConnected}, &oauth2.Config{})
-	ctx := context.Background()
-
-	tests := []struct {
-		name string
-		call func() error
-	}{
-		{"GetEvents", func() error { _, err := c.GetEvents(ctx, "owner", EventQuery{}); return err }},
-		{"AddEvent", func() error { _, err := c.AddEvent(ctx, "owner", EventInput{}); return err }},
-		{"ReadMessages", func() error { _, err := c.ReadMessages(ctx, "owner", ""); return err }},
-		{"GetMessagesByLabel", func() error { _, err := c.GetMessagesByLabel(ctx, "owner", "INBOX"); return err }},
-		{"SendEmail", func() error { return c.SendEmail(ctx, "owner", "to@example.com", "s", "b") }},
-		{"GetLabels", func() error { _, err := c.GetLabels(ctx, "owner"); return err }},
-		{"CreateLabel", func() error { _, err := c.CreateLabel(ctx, "owner", "name"); return err }},
-		{"ApplyLabel", func() error { return c.ApplyLabel(ctx, "owner", "msg", "lbl") }},
-		{"GetContacts", func() error { _, err := c.GetContacts(ctx, "owner"); return err }},
-		{"AddContact", func() error { _, err := c.AddContact(ctx, "owner", ContactInput{}); return err }},
-	}
-	for _, tt := range tests {
-		if err := tt.call(); !errors.Is(err, ErrNotConnected) {
-			t.Errorf("%s err = %v, want ErrNotConnected", tt.name, err)
-		}
+	_, err := c.TokenSourceFor(context.Background(), "owner")
+	if !errors.Is(err, ErrNotConnected) {
+		t.Errorf("TokenSourceFor err = %v, want ErrNotConnected", err)
 	}
 }
 
-func TestSentinelFor(t *testing.T) {
-	if got := sentinelFor(&googleapi.Error{Code: 429}); !errors.Is(got, ErrRateLimited) {
-		t.Errorf("sentinelFor(429) = %v, want ErrRateLimited", got)
+func TestWrapError(t *testing.T) {
+	if err := WrapError("op", &googleapi.Error{Code: 429}); !errors.Is(err, ErrRateLimited) {
+		t.Errorf("WrapError(429) does not wrap ErrRateLimited: %v", err)
 	}
-	if got := sentinelFor(&googleapi.Error{Code: 404}); got != nil {
-		t.Errorf("sentinelFor(404) = %v, want nil", got)
+	if err := WrapError("op", &googleapi.Error{Code: 404}); errors.Is(err, ErrRateLimited) {
+		t.Errorf("WrapError(404) incorrectly wraps ErrRateLimited")
 	}
-	if got := sentinelFor(errors.New("boom")); got != nil {
-		t.Errorf("sentinelFor(non-api) = %v, want nil", got)
-	}
-}
-
-func TestWrapErrorNil(t *testing.T) {
-	if err := wrapError("op", nil); err != nil {
-		t.Errorf("wrapError(nil) = %v, want nil", err)
+	if err := WrapError("op", nil); err != nil {
+		t.Errorf("WrapError(nil) = %v, want nil", err)
 	}
 }

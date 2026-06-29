@@ -1,18 +1,29 @@
-package gworkspace
+// Package contact provides Google Contacts access for a Workspace owner.
+// Construct a Service with a gworkspace.Connector (typically *gworkspace.Client)
+// and call its methods; OAuth tokens are resolved per request.
+package contact
 
 import (
 	"context"
 
-	people "google.golang.org/api/people/v1"
+	peoplev1 "google.golang.org/api/people/v1"
+	"google.golang.org/api/option"
+
+	"go.naturallyfunny.dev/gworkspace"
 )
 
-// personFields selects which fields the People API returns and which it reads on
-// create — the subset the Contact type exposes.
 const personFields = "names,emailAddresses,phoneNumbers"
-
-// maxContacts caps how many contacts GetContacts returns. Hardcoded; pagination
-// deferred (see CLAUDE.md Design Decisions).
 const maxContacts = 50
+
+// Service provides Google Contacts access for a Workspace owner.
+type Service struct {
+	conn gworkspace.Connector
+}
+
+// New builds a Service that uses conn to obtain per-owner OAuth tokens.
+func New(conn gworkspace.Connector) *Service {
+	return &Service{conn: conn}
+}
 
 // Contact is a person in the owner's Google Contacts. ResourceName is the People
 // API identifier (e.g. "people/c123").
@@ -31,9 +42,9 @@ type ContactInput struct {
 }
 
 // GetContacts returns the owner's contacts.
-// Returns ErrNotConnected if the owner has not connected.
-func (c *Client) GetContacts(ctx context.Context, owner string) ([]Contact, error) {
-	svc, err := c.peopleFor(ctx, owner)
+// Returns gworkspace.ErrNotConnected if the owner has not connected.
+func (s *Service) GetContacts(ctx context.Context, owner string) ([]Contact, error) {
+	svc, err := s.peopleFor(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +54,7 @@ func (c *Client) GetContacts(ctx context.Context, owner string) ([]Contact, erro
 		Context(ctx).
 		Do()
 	if err != nil {
-		return nil, wrapError("get contacts", err)
+		return nil, gworkspace.WrapError("get contacts", err)
 	}
 	contacts := make([]Contact, 0, len(res.Connections))
 	for _, p := range res.Connections {
@@ -53,22 +64,22 @@ func (c *Client) GetContacts(ctx context.Context, owner string) ([]Contact, erro
 }
 
 // AddContact creates a contact for the owner and returns it.
-// Returns ErrNotConnected if the owner has not connected.
-func (c *Client) AddContact(ctx context.Context, owner string, in ContactInput) (Contact, error) {
-	svc, err := c.peopleFor(ctx, owner)
+// Returns gworkspace.ErrNotConnected if the owner has not connected.
+func (s *Service) AddContact(ctx context.Context, owner string, in ContactInput) (Contact, error) {
+	svc, err := s.peopleFor(ctx, owner)
 	if err != nil {
 		return Contact{}, err
 	}
 
-	person := &people.Person{}
+	person := &peoplev1.Person{}
 	if in.Name != "" {
-		person.Names = []*people.Name{{GivenName: in.Name}}
+		person.Names = []*peoplev1.Name{{GivenName: in.Name}}
 	}
 	for _, e := range in.Emails {
-		person.EmailAddresses = append(person.EmailAddresses, &people.EmailAddress{Value: e})
+		person.EmailAddresses = append(person.EmailAddresses, &peoplev1.EmailAddress{Value: e})
 	}
 	for _, p := range in.Phones {
-		person.PhoneNumbers = append(person.PhoneNumbers, &people.PhoneNumber{Value: p})
+		person.PhoneNumbers = append(person.PhoneNumbers, &peoplev1.PhoneNumber{Value: p})
 	}
 
 	// Request personFields on create too: without it the People API returns the
@@ -76,12 +87,20 @@ func (c *Client) AddContact(ctx context.Context, owner string, in ContactInput) 
 	// would yield an empty Name on the created contact.
 	created, err := svc.People.CreateContact(person).PersonFields(personFields).Context(ctx).Do()
 	if err != nil {
-		return Contact{}, wrapError("add contact", err)
+		return Contact{}, gworkspace.WrapError("add contact", err)
 	}
 	return contactFrom(created), nil
 }
 
-func contactFrom(p *people.Person) Contact {
+func (s *Service) peopleFor(ctx context.Context, owner string) (*peoplev1.Service, error) {
+	ts, err := s.conn.TokenSourceFor(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	return peoplev1.NewService(ctx, option.WithTokenSource(ts))
+}
+
+func contactFrom(p *peoplev1.Person) Contact {
 	contact := Contact{ResourceName: p.ResourceName}
 	if len(p.Names) > 0 {
 		contact.Name = p.Names[0].DisplayName

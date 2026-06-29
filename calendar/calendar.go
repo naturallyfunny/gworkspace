@@ -1,19 +1,30 @@
-package gworkspace
+// Package calendar provides Google Calendar access for a Workspace owner.
+// Construct a Service with a gworkspace.Connector (typically *gworkspace.Client)
+// and call its methods; OAuth tokens are resolved per request.
+package calendar
 
 import (
 	"context"
 	"time"
 
-	calendar "google.golang.org/api/calendar/v3"
+	calendarv3 "google.golang.org/api/calendar/v3"
+	"google.golang.org/api/option"
+
+	"go.naturallyfunny.dev/gworkspace"
 )
 
-// defaultCalendarID is used when an EventQuery or EventInput leaves CalendarID
-// empty. "primary" is the user's main calendar.
 const defaultCalendarID = "primary"
-
-// maxEvents caps how many events a single GetEvents call returns. Hardcoded;
-// pagination deferred until a real need (see CLAUDE.md Design Decisions).
 const maxEvents = 10
+
+// Service provides Google Calendar access for a Workspace owner.
+type Service struct {
+	conn gworkspace.Connector
+}
+
+// New builds a Service that uses conn to obtain per-owner OAuth tokens.
+func New(conn gworkspace.Connector) *Service {
+	return &Service{conn: conn}
+}
 
 // Event is a calendar event. Start and End are the event's instants; for all-day
 // events they are the date at midnight UTC.
@@ -52,9 +63,9 @@ type EventInput struct {
 }
 
 // GetEvents returns events for the owner matching q, ordered by start time.
-// Returns ErrNotConnected if the owner has not connected.
-func (c *Client) GetEvents(ctx context.Context, owner string, q EventQuery) ([]Event, error) {
-	svc, err := c.calendarFor(ctx, owner)
+// Returns gworkspace.ErrNotConnected if the owner has not connected.
+func (s *Service) GetEvents(ctx context.Context, owner string, q EventQuery) ([]Event, error) {
+	svc, err := s.calendarFor(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +97,7 @@ func (c *Client) GetEvents(ctx context.Context, owner string, q EventQuery) ([]E
 
 	res, err := call.Do()
 	if err != nil {
-		return nil, wrapError("get events", err)
+		return nil, gworkspace.WrapError("get events", err)
 	}
 	events := make([]Event, 0, len(res.Items))
 	for _, item := range res.Items {
@@ -96,9 +107,9 @@ func (c *Client) GetEvents(ctx context.Context, owner string, q EventQuery) ([]E
 }
 
 // AddEvent creates an event for the owner and returns the created event.
-// Returns ErrNotConnected if the owner has not connected.
-func (c *Client) AddEvent(ctx context.Context, owner string, in EventInput) (Event, error) {
-	svc, err := c.calendarFor(ctx, owner)
+// Returns gworkspace.ErrNotConnected if the owner has not connected.
+func (s *Service) AddEvent(ctx context.Context, owner string, in EventInput) (Event, error) {
+	svc, err := s.calendarFor(ctx, owner)
 	if err != nil {
 		return Event{}, err
 	}
@@ -108,28 +119,36 @@ func (c *Client) AddEvent(ctx context.Context, owner string, in EventInput) (Eve
 		calendarID = defaultCalendarID
 	}
 
-	attendees := make([]*calendar.EventAttendee, 0, len(in.Guests))
+	attendees := make([]*calendarv3.EventAttendee, 0, len(in.Guests))
 	for _, g := range in.Guests {
-		attendees = append(attendees, &calendar.EventAttendee{Email: g})
+		attendees = append(attendees, &calendarv3.EventAttendee{Email: g})
 	}
 
-	event := &calendar.Event{
+	event := &calendarv3.Event{
 		Summary:     in.Summary,
 		Description: in.Description,
 		Location:    in.Location,
-		Start:       &calendar.EventDateTime{DateTime: in.Start.Format(time.RFC3339)},
-		End:         &calendar.EventDateTime{DateTime: in.End.Format(time.RFC3339)},
+		Start:       &calendarv3.EventDateTime{DateTime: in.Start.Format(time.RFC3339)},
+		End:         &calendarv3.EventDateTime{DateTime: in.End.Format(time.RFC3339)},
 		Attendees:   attendees,
 	}
 
 	created, err := svc.Events.Insert(calendarID, event).Context(ctx).Do()
 	if err != nil {
-		return Event{}, wrapError("add event", err)
+		return Event{}, gworkspace.WrapError("add event", err)
 	}
 	return eventFrom(created), nil
 }
 
-func eventFrom(e *calendar.Event) Event {
+func (s *Service) calendarFor(ctx context.Context, owner string) (*calendarv3.Service, error) {
+	ts, err := s.conn.TokenSourceFor(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
+	return calendarv3.NewService(ctx, option.WithTokenSource(ts))
+}
+
+func eventFrom(e *calendarv3.Event) Event {
 	attendees := make([]string, 0, len(e.Attendees))
 	for _, a := range e.Attendees {
 		attendees = append(attendees, a.Email)
@@ -149,7 +168,7 @@ func eventFrom(e *calendar.Event) Event {
 // parseEventTime reads an EventDateTime, which carries either DateTime (RFC3339,
 // for timed events) or Date (yyyy-mm-dd, for all-day events). Returns the zero
 // time when neither parses.
-func parseEventTime(dt *calendar.EventDateTime) time.Time {
+func parseEventTime(dt *calendarv3.EventDateTime) time.Time {
 	if dt == nil {
 		return time.Time{}
 	}
@@ -165,3 +184,4 @@ func parseEventTime(dt *calendar.EventDateTime) time.Time {
 	}
 	return time.Time{}
 }
+

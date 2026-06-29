@@ -1,0 +1,67 @@
+package contact
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"testing"
+
+	"golang.org/x/oauth2"
+	peoplev1 "google.golang.org/api/people/v1"
+
+	"go.naturallyfunny.dev/gworkspace"
+)
+
+type fakeConnector struct{ err error }
+
+func (f *fakeConnector) TokenSourceFor(_ context.Context, _ string) (oauth2.TokenSource, error) {
+	return nil, f.err
+}
+
+func TestNotConnectedPropagates(t *testing.T) {
+	svc := New(&fakeConnector{err: gworkspace.ErrNotConnected})
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{"GetContacts", func() error { _, err := svc.GetContacts(ctx, "owner"); return err }},
+		{"AddContact", func() error { _, err := svc.AddContact(ctx, "owner", ContactInput{}); return err }},
+	}
+	for _, tt := range tests {
+		if err := tt.call(); !errors.Is(err, gworkspace.ErrNotConnected) {
+			t.Errorf("%s err = %v, want ErrNotConnected", tt.name, err)
+		}
+	}
+}
+
+func TestContactFrom(t *testing.T) {
+	p := &peoplev1.Person{
+		ResourceName: "people/c123",
+		Names:        []*peoplev1.Name{{DisplayName: "Alice Smith"}},
+		EmailAddresses: []*peoplev1.EmailAddress{
+			{Value: "alice@example.com"},
+			{Value: "a.smith@work.com"},
+		},
+		PhoneNumbers: []*peoplev1.PhoneNumber{{Value: "+1234567890"}},
+	}
+
+	want := Contact{
+		ResourceName: "people/c123",
+		Name:         "Alice Smith",
+		Emails:       []string{"alice@example.com", "a.smith@work.com"},
+		Phones:       []string{"+1234567890"},
+	}
+
+	if got := contactFrom(p); !reflect.DeepEqual(got, want) {
+		t.Errorf("contactFrom() = %+v, want %+v", got, want)
+	}
+}
+
+func TestContactFromEmpty(t *testing.T) {
+	got := contactFrom(&peoplev1.Person{ResourceName: "people/c0"})
+	if got.Name != "" || len(got.Emails) != 0 || len(got.Phones) != 0 {
+		t.Errorf("contactFrom(empty) = %+v", got)
+	}
+}
