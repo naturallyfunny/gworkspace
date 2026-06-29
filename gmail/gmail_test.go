@@ -27,8 +27,8 @@ func TestNotConnectedPropagates(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"ReadMessages", func() error { _, err := svc.ReadMessages(ctx, "owner", ""); return err }},
-		{"GetMessagesByLabel", func() error { _, err := svc.GetMessagesByLabel(ctx, "owner", "INBOX"); return err }},
+		{"ReadMessages", func() error { _, err := svc.ReadMessages(ctx, "owner", MessageQuery{}); return err }},
+		{"GetMessagesByLabel", func() error { _, err := svc.GetMessagesByLabel(ctx, "owner", "INBOX", LabelQuery{}); return err }},
 		{"SendEmail", func() error { return svc.SendEmail(ctx, "owner", "to@example.com", "s", "b") }},
 		{"GetLabels", func() error { _, err := svc.GetLabels(ctx, "owner"); return err }},
 		{"CreateLabel", func() error { _, err := svc.CreateLabel(ctx, "owner", "name"); return err }},

@@ -26,7 +26,7 @@ func TestNotConnectedPropagates(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"GetContacts", func() error { _, err := svc.GetContacts(ctx, "owner"); return err }},
+		{"GetContacts", func() error { _, err := svc.GetContacts(ctx, "owner", ContactQuery{}); return err }},
 		{"AddContact", func() error { _, err := svc.AddContact(ctx, "owner", ContactInput{}); return err }},
 	}
 	for _, tt := range tests {

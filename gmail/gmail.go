@@ -17,7 +17,21 @@ import (
 )
 
 const gmailUser = "me"
-const maxMessages = 10
+
+// MessageQuery filters a ReadMessages call. The zero value lists recent messages.
+// Query is a Gmail search query (e.g., "is:unread", "from:alice@example.com").
+// Limit sets the maximum results returned; zero or negative applies no cap
+// (Gmail API default applies).
+type MessageQuery struct {
+	Query string
+	Limit int
+}
+
+// LabelQuery filters a GetMessagesByLabel call. Limit sets the maximum results
+// returned; zero or negative applies no cap (Gmail API default applies).
+type LabelQuery struct {
+	Limit int
+}
 
 // Service provides Google Gmail access for a Workspace owner.
 type Service struct {
@@ -53,14 +67,17 @@ type Label struct {
 // ReadMessages returns messages matching the Gmail search query (e.g.
 // "is:unread", "from:alice@example.com"). An empty query lists recent messages.
 // Returns gworkspace.ErrNotConnected if the owner has not connected.
-func (s *Service) ReadMessages(ctx context.Context, owner, query string) ([]Message, error) {
+func (s *Service) ReadMessages(ctx context.Context, owner string, q MessageQuery) ([]Message, error) {
 	svc, err := s.gmailFor(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
-	call := svc.Users.Messages.List(gmailUser).MaxResults(maxMessages).Context(ctx)
-	if query != "" {
-		call = call.Q(query)
+	call := svc.Users.Messages.List(gmailUser).Context(ctx)
+	if q.Query != "" {
+		call = call.Q(q.Query)
+	}
+	if q.Limit > 0 {
+		call = call.MaxResults(int64(q.Limit))
 	}
 	res, err := call.Do()
 	if err != nil {
@@ -71,16 +88,16 @@ func (s *Service) ReadMessages(ctx context.Context, owner, query string) ([]Mess
 
 // GetMessagesByLabel returns messages carrying the given label ID.
 // Returns gworkspace.ErrNotConnected if the owner has not connected.
-func (s *Service) GetMessagesByLabel(ctx context.Context, owner, labelID string) ([]Message, error) {
+func (s *Service) GetMessagesByLabel(ctx context.Context, owner, labelID string, q LabelQuery) ([]Message, error) {
 	svc, err := s.gmailFor(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
-	res, err := svc.Users.Messages.List(gmailUser).
-		LabelIds(labelID).
-		MaxResults(maxMessages).
-		Context(ctx).
-		Do()
+	call := svc.Users.Messages.List(gmailUser).LabelIds(labelID).Context(ctx)
+	if q.Limit > 0 {
+		call = call.MaxResults(int64(q.Limit))
+	}
+	res, err := call.Do()
 	if err != nil {
 		return nil, gworkspace.WrapError("get messages by label", err)
 	}

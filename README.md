@@ -20,16 +20,17 @@ high-throughput.** Lihat "Design Decisions".
 ## Struktur
 
 ```
-client.go     Client, TokenStore interface, ErrNotConnected, RequiredScopes,
-              OAuth (AuthURL/Exchange/Connect), xxxFor helper, error mapping
-              lintas-fitur (ErrRateLimited, wrapError, sentinelFor)
-calendar.go   GetEvents, AddEvent; tipe Event/EventQuery/EventInput
-gmail.go      ReadMessages, SendEmail, GetLabels, ApplyLabel, CreateLabel,
-              GetMessagesByLabel; tipe Message/Label
-contact.go    GetContacts, AddContact; tipe Contact/ContactInput
+client.go       Client, Connector, TokenStore, ErrNotConnected/ErrRateLimited,
+                RequiredScopes, New, OAuth (AuthURL/Exchange/Connect),
+                TokenSourceFor, WrapError, sentinelFor
+calendar/       Service, Event/EventQuery/EventInput, GetEvents, AddEvent
+gmail/          Service, Message/Label, MessageQuery/LabelQuery,
+                ReadMessages, SendEmail, GetLabels, ApplyLabel, CreateLabel,
+                GetMessagesByLabel
+contact/        Service, Contact/ContactInput/ContactQuery, GetContacts, AddContact
 postgres/
-  store.go    implementasi TokenStore di atas Querier (pgxpool), NewStore/WithAutoMigrate
-  migrations/ SQL files, di-embed via //go:embed
+  store.go      implementasi TokenStore di atas Querier (pgxpool), NewStore/WithAutoMigrate
+  migrations/   SQL files, di-embed via //go:embed
 ```
 
 ## Cara Pakai
@@ -50,9 +51,13 @@ url := client.AuthURL(state)        // arahkan user ke sini
 err := client.Connect(ctx, owner, code) // di callback
 
 // Pemakaian:
-events, err := client.GetEvents(ctx, owner, gworkspace.EventQuery{Query: "standup"})
-err = client.SendEmail(ctx, owner, "bob@example.com", "Hi", "body")
-contacts, err := client.GetContacts(ctx, owner)
+calSvc     := calendar.New(client)
+gmailSvc   := gmail.New(client)
+contactSvc := contact.New(client)
+
+events, err   := calSvc.GetEvents(ctx, owner, calendar.EventQuery{Query: "standup"})
+err            = gmailSvc.SendEmail(ctx, owner, "bob@example.com", "Hi", "body")
+contacts, err := contactSvc.GetContacts(ctx, owner, contact.ContactQuery{})
 ```
 
 User belum connect → method mengembalikan `gworkspace.ErrNotConnected`
@@ -78,8 +83,10 @@ Trade-off berikut ditimbang sadar untuk use-case "tool AI agent, traffic rendah"
   `*Service` Google baru dari refresh token lalu dibuang. Aman untuk traffic
   rendah. Caching `*Service`/access-token per-user ditunda sampai ada kebutuhan
   throughput nyata.
-- **Limit hardcoded, tanpa paginasi** (events 10, messages 10, contacts 50).
-  Cukup untuk satu aksi per intent agent. Paginasi konfigurabel ditunda.
+- **Limit consumer-controlled, tanpa paginasi.** Query structs (`EventQuery`,
+  `MessageQuery`, `LabelQuery`, `ContactQuery`) expose `Limit int`: nol atau
+  negatif → no cap (API default berlaku); positif → explicit cap. Paginasi
+  konfigurabel ditunda.
 - **Refresh token plaintext** (`postgres/store.go`). Enkripsi-at-rest adalah
   tanggung jawab **konsumen** lewat implementasi `TokenStore`-nya sendiri, bukan
   library.

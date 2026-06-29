@@ -13,7 +13,12 @@ import (
 )
 
 const personFields = "names,emailAddresses,phoneNumbers"
-const maxContacts = 50
+
+// ContactQuery filters a GetContacts call. Limit sets the maximum results
+// returned; zero or negative applies no cap (People API default applies).
+type ContactQuery struct {
+	Limit int
+}
 
 // Service provides Google Contacts access for a Workspace owner.
 type Service struct {
@@ -43,16 +48,18 @@ type ContactInput struct {
 
 // GetContacts returns the owner's contacts.
 // Returns gworkspace.ErrNotConnected if the owner has not connected.
-func (s *Service) GetContacts(ctx context.Context, owner string) ([]Contact, error) {
+func (s *Service) GetContacts(ctx context.Context, owner string, q ContactQuery) ([]Contact, error) {
 	svc, err := s.peopleFor(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
-	res, err := svc.People.Connections.List("people/me").
+	call := svc.People.Connections.List("people/me").
 		PersonFields(personFields).
-		PageSize(maxContacts).
-		Context(ctx).
-		Do()
+		Context(ctx)
+	if q.Limit > 0 {
+		call = call.PageSize(int64(q.Limit))
+	}
+	res, err := call.Do()
 	if err != nil {
 		return nil, gworkspace.WrapError("get contacts", err)
 	}

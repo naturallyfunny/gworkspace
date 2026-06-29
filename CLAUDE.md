@@ -48,8 +48,9 @@ Contacts) per-user dengan satu OAuth token. Dirancang sebagai fondasi ADK toolse
 
 ## Design Decisions
 
-Lihat README "Design Decisions": refresh per-request, limit hardcoded, refresh token
-plaintext (tanggung jawab konsumen), sentinel minimal. Sengaja — bukan bug.
+Lihat README "Design Decisions": refresh per-request, limit consumer-controlled via
+query structs (zero = no cap, API default applies), refresh token plaintext
+(tanggung jawab konsumen), sentinel minimal. Sengaja — bukan bug.
 
 ## Verifikasi
 

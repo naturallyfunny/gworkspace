@@ -14,7 +14,6 @@ import (
 )
 
 const defaultCalendarID = "primary"
-const maxEvents = 10
 
 // Service provides Google Calendar access for a Workspace owner.
 type Service struct {
@@ -42,12 +41,15 @@ type Event struct {
 // EventQuery filters a GetEvents call. The zero value lists upcoming events on
 // the primary calendar. CalendarID defaults to "primary"; Query is a free-text
 // search. TimeMin defaults to now (so the zero query is forward-looking); set it
-// to a past time to include history. TimeMax is open unless set.
+// to a past time to include history. TimeMax is open unless set. Limit sets the
+// maximum results returned; zero or negative applies no cap (Google Calendar
+// API default applies).
 type EventQuery struct {
 	CalendarID string
 	Query      string
 	TimeMin    time.Time
 	TimeMax    time.Time
+	Limit      int
 }
 
 // EventInput describes an event to create. CalendarID defaults to "primary".
@@ -78,7 +80,6 @@ func (s *Service) GetEvents(ctx context.Context, owner string, q EventQuery) ([]
 	call := svc.Events.List(calendarID).
 		SingleEvents(true).
 		OrderBy("startTime").
-		MaxResults(maxEvents).
 		Context(ctx)
 	if q.Query != "" {
 		call = call.Q(q.Query)
@@ -93,6 +94,9 @@ func (s *Service) GetEvents(ctx context.Context, owner string, q EventQuery) ([]
 	call = call.TimeMin(timeMin.Format(time.RFC3339))
 	if !q.TimeMax.IsZero() {
 		call = call.TimeMax(q.TimeMax.Format(time.RFC3339))
+	}
+	if q.Limit > 0 {
+		call = call.MaxResults(int64(q.Limit))
 	}
 
 	res, err := call.Do()
