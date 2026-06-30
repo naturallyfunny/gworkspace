@@ -11,20 +11,8 @@ import (
 	calendarv3 "google.golang.org/api/calendar/v3"
 )
 
-// fakeAuth is a test double for gworkspace.Auth, shared across test files.
-type fakeAuth struct {
-	err    error
-	scopes []string
-}
-
-func (f *fakeAuth) TokenSource(_ context.Context, _ string) (oauth2.TokenSource, error) {
-	return nil, f.err
-}
-
-func (f *fakeAuth) Scopes() []string { return f.scopes }
-
 func TestCalendarNotConnectedPropagates(t *testing.T) {
-	cal, err := NewCalendar(&fakeAuth{err: ErrNotConnected, scopes: CalendarRequiredScopes})
+	cal, err := NewCalendar(NewClient(&fakeTokenStore{err: ErrNotConnected}, &oauth2.Config{Scopes: CalendarRequiredScopes}))
 	if err != nil {
 		t.Fatalf("NewCalendar: %v", err)
 	}
@@ -45,7 +33,7 @@ func TestCalendarNotConnectedPropagates(t *testing.T) {
 }
 
 func TestNewCalendarMissingScopes(t *testing.T) {
-	_, err := NewCalendar(&fakeAuth{scopes: []string{}})
+	_, err := NewCalendar(NewClient(&fakeTokenStore{}, &oauth2.Config{}))
 	if err == nil {
 		t.Error("NewCalendar with empty scopes should return error")
 	}

@@ -7,11 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/oauth2"
 	gmailv1 "google.golang.org/api/gmail/v1"
 )
 
 func TestGmailNotConnectedPropagates(t *testing.T) {
-	gm, err := NewGmail(&fakeAuth{err: ErrNotConnected, scopes: GmailRequiredScopes})
+	gm, err := NewGmail(NewClient(&fakeTokenStore{err: ErrNotConnected}, &oauth2.Config{Scopes: GmailRequiredScopes}))
 	if err != nil {
 		t.Fatalf("NewGmail: %v", err)
 	}
@@ -36,7 +37,7 @@ func TestGmailNotConnectedPropagates(t *testing.T) {
 }
 
 func TestNewGmailMissingScopes(t *testing.T) {
-	_, err := NewGmail(&fakeAuth{scopes: []string{}})
+	_, err := NewGmail(NewClient(&fakeTokenStore{}, &oauth2.Config{}))
 	if err == nil {
 		t.Error("NewGmail with empty scopes should return error")
 	}

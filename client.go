@@ -22,15 +22,37 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// ErrNotConnected is returned when the owner has not completed the OAuth
+// connect flow and therefore has no stored refresh token. Route the user
+// through Client.AuthURL / Client.Connect to resolve it.
+var ErrNotConnected = errors.New("gworkspace: user not connected")
+
+// checkScopes returns an error if have does not contain every scope in need.
+// Used by domain constructors to fail fast when the Client was configured without
+// the scopes that capability requires.
+func checkScopes(have, need []string) error {
+	haveSet := make(map[string]bool, len(have))
+	for _, s := range have {
+		haveSet[s] = true
+	}
+	var missing []string
+	for _, s := range need {
+		if !haveSet[s] {
+			missing = append(missing, s)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("gworkspace: missing required scopes: %s", strings.Join(missing, ", "))
+	}
+	return nil
+}
+
 // Client holds an *oauth2.Config and a TokenStore; it builds a fresh token
 // source per request from the owner's stored refresh token.
-// Client implements Auth.
 type Client struct {
 	tokenStore TokenStore
 	oauth2Cfg  *oauth2.Config
 }
-
-var _ Auth = (*Client)(nil)
 
 // TokenStore persists Google Workspace OAuth refresh tokens keyed by owner.
 // Implement this interface to provide your own storage backend.
@@ -107,7 +129,7 @@ func (c *Client) Connect(ctx context.Context, owner, code string) error {
 
 // TokenSource resolves the owner's refresh token and returns an oauth2.TokenSource
 // that refreshes access tokens on demand. Returns ErrNotConnected
-// when the owner has not connected. TokenSource implements Auth.
+// when the owner has not connected.
 func (c *Client) TokenSource(ctx context.Context, owner string) (oauth2.TokenSource, error) {
 	refreshToken, err := c.tokenStore.GetRefreshToken(ctx, owner)
 	if err != nil {

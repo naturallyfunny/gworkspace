@@ -15,20 +15,30 @@ var CalendarRequiredScopes = []string{
 	calendarv3.CalendarScope,
 }
 
-const defaultCalendarID = "primary"
-
 // Calendar provides Google Calendar access for a Workspace owner.
 type Calendar struct {
-	auth Auth
+	client *Client
 }
 
-// NewCalendar builds a Calendar that uses auth to obtain per-owner OAuth tokens.
-// Returns an error if auth does not carry CalendarRequiredScopes.
-func NewCalendar(auth Auth) (*Calendar, error) {
-	if err := checkScopes(auth.Scopes(), CalendarRequiredScopes); err != nil {
+// NewCalendar builds a Calendar that uses client to obtain per-owner OAuth tokens.
+// Returns an error if client does not carry CalendarRequiredScopes.
+func NewCalendar(client *Client) (*Calendar, error) {
+	if err := checkScopes(client.Scopes(), CalendarRequiredScopes); err != nil {
 		return nil, err
 	}
-	return &Calendar{auth: auth}, nil
+	return &Calendar{client: client}, nil
+}
+
+// EventInput describes an event to create. CalendarID defaults to "primary".
+// Guests are added as attendees by email address.
+type EventInput struct {
+	CalendarID  string
+	Summary     string
+	Description string
+	Location    string
+	Start       time.Time
+	End         time.Time
+	Guests      []string
 }
 
 // Event is a calendar event. Start and End are the event's instants; for all-day
@@ -58,18 +68,7 @@ type EventQuery struct {
 	Limit      int
 }
 
-// EventInput describes an event to create. CalendarID defaults to "primary".
-// Guests are added as attendees by email address.
-type EventInput struct {
-	CalendarID  string
-	Summary     string
-	Description string
-	Location    string
-	Start       time.Time
-	End         time.Time
-	Guests      []string
-}
-
+const defaultCalendarID = "primary"
 // GetEvents returns events for the owner matching q, ordered by start time.
 // Returns ErrNotConnected if the owner has not connected.
 func (c *Calendar) GetEvents(ctx context.Context, owner string, q EventQuery) ([]Event, error) {
@@ -151,7 +150,7 @@ func (c *Calendar) AddEvent(ctx context.Context, owner string, in EventInput) (E
 }
 
 func (c *Calendar) calendarFor(ctx context.Context, owner string) (*calendarv3.Service, error) {
-	ts, err := c.auth.TokenSource(ctx, owner)
+	ts, err := c.client.TokenSource(ctx, owner)
 	if err != nil {
 		return nil, err
 	}

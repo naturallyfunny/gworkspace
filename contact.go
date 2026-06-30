@@ -24,16 +24,16 @@ type ContactQuery struct {
 
 // Contacts provides Google Contacts access for a Workspace owner.
 type Contacts struct {
-	auth Auth
+	client *Client
 }
 
-// NewContacts builds a Contacts client that uses auth to obtain per-owner OAuth tokens.
-// Returns an error if auth does not carry ContactsRequiredScopes.
-func NewContacts(auth Auth) (*Contacts, error) {
-	if err := checkScopes(auth.Scopes(), ContactsRequiredScopes); err != nil {
+// NewContacts builds a Contacts client that uses client to obtain per-owner OAuth tokens.
+// Returns an error if client does not carry ContactsRequiredScopes.
+func NewContacts(client *Client) (*Contacts, error) {
+	if err := checkScopes(client.Scopes(), ContactsRequiredScopes); err != nil {
 		return nil, err
 	}
-	return &Contacts{auth: auth}, nil
+	return &Contacts{client: client}, nil
 }
 
 // Contact is a person in the owner's Google Contacts. ResourceName is the People
@@ -106,7 +106,7 @@ func (c *Contacts) AddContact(ctx context.Context, owner string, in ContactInput
 }
 
 func (c *Contacts) peopleFor(ctx context.Context, owner string) (*peoplev1.Service, error) {
-	ts, err := c.auth.TokenSource(ctx, owner)
+	ts, err := c.client.TokenSource(ctx, owner)
 	if err != nil {
 		return nil, err
 	}

@@ -37,16 +37,16 @@ type LabelQuery struct {
 
 // Gmail provides Google Gmail access for a Workspace owner.
 type Gmail struct {
-	auth Auth
+	client *Client
 }
 
-// NewGmail builds a Gmail client that uses auth to obtain per-owner OAuth tokens.
-// Returns an error if auth does not carry GmailRequiredScopes.
-func NewGmail(auth Auth) (*Gmail, error) {
-	if err := checkScopes(auth.Scopes(), GmailRequiredScopes); err != nil {
+// NewGmail builds a Gmail client that uses client to obtain per-owner OAuth tokens.
+// Returns an error if client does not carry GmailRequiredScopes.
+func NewGmail(client *Client) (*Gmail, error) {
+	if err := checkScopes(client.Scopes(), GmailRequiredScopes); err != nil {
 		return nil, err
 	}
-	return &Gmail{auth: auth}, nil
+	return &Gmail{client: client}, nil
 }
 
 // Message is an email message. Body is the decoded text/plain part when present,
@@ -184,7 +184,7 @@ func (c *Gmail) ApplyLabel(ctx context.Context, owner, messageID, labelID string
 }
 
 func (c *Gmail) gmailFor(ctx context.Context, owner string) (*gmailv1.Service, error) {
-	ts, err := c.auth.TokenSource(ctx, owner)
+	ts, err := c.client.TokenSource(ctx, owner)
 	if err != nil {
 		return nil, err
 	}

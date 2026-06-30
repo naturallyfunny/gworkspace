@@ -6,11 +6,12 @@ import (
 	"reflect"
 	"testing"
 
+	"golang.org/x/oauth2"
 	peoplev1 "google.golang.org/api/people/v1"
 )
 
 func TestContactsNotConnectedPropagates(t *testing.T) {
-	con, err := NewContacts(&fakeAuth{err: ErrNotConnected, scopes: ContactsRequiredScopes})
+	con, err := NewContacts(NewClient(&fakeTokenStore{err: ErrNotConnected}, &oauth2.Config{Scopes: ContactsRequiredScopes}))
 	if err != nil {
 		t.Fatalf("NewContacts: %v", err)
 	}
@@ -31,7 +32,7 @@ func TestContactsNotConnectedPropagates(t *testing.T) {
 }
 
 func TestNewContactsMissingScopes(t *testing.T) {
-	_, err := NewContacts(&fakeAuth{scopes: []string{}})
+	_, err := NewContacts(NewClient(&fakeTokenStore{}, &oauth2.Config{}))
 	if err == nil {
 		t.Error("NewContacts with empty scopes should return error")
 	}
