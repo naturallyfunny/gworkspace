@@ -1,4 +1,4 @@
-package auth
+package gworkspace
 
 import (
 	"context"
@@ -6,21 +6,19 @@ import (
 	"testing"
 
 	"golang.org/x/oauth2"
-
-	"go.naturallyfunny.dev/gworkspace"
 )
 
-type fakeStore struct {
+type fakeTokenStore struct {
 	token string
 	err   error
 	saved map[string]string
 }
 
-func (f *fakeStore) GetRefreshToken(_ context.Context, _ string) (string, error) {
+func (f *fakeTokenStore) GetRefreshToken(_ context.Context, _ string) (string, error) {
 	return f.token, f.err
 }
 
-func (f *fakeStore) SaveRefreshToken(_ context.Context, owner, refreshToken string) error {
+func (f *fakeTokenStore) SaveRefreshToken(_ context.Context, owner, refreshToken string) error {
 	if f.saved == nil {
 		f.saved = map[string]string{}
 	}
@@ -32,9 +30,9 @@ func (f *fakeStore) SaveRefreshToken(_ context.Context, owner, refreshToken stri
 // (Calendar, Gmail, Contacts) can propagate it to callers without touching
 // the network.
 func TestTokenSourceNotConnected(t *testing.T) {
-	c := New(&fakeStore{err: gworkspace.ErrNotConnected}, &oauth2.Config{})
+	c := NewClient(&fakeTokenStore{err: ErrNotConnected}, &oauth2.Config{})
 	_, err := c.TokenSource(context.Background(), "owner")
-	if !errors.Is(err, gworkspace.ErrNotConnected) {
+	if !errors.Is(err, ErrNotConnected) {
 		t.Errorf("TokenSource err = %v, want ErrNotConnected", err)
 	}
 }

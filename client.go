@@ -1,16 +1,17 @@
-// Package auth provides the OAuth client for Google Workspace.
+// Package gworkspace is a reusable client for a user's Google Workspace:
+// callers reach Calendar, Gmail, and Contacts by their own opaque owner string.
 // Build one Client and pass it to any combination of domain constructors:
 //
-//	a   := auth.New(store, cfg)
-//	cal := gworkspace.NewCalendar(a)
-//	gm  := gworkspace.NewGmail(a)
-//	con := gworkspace.NewContacts(a)
+//	c   := gworkspace.NewClient(store, cfg)
+//	cal := gworkspace.NewCalendar(c)
+//	gm  := gworkspace.NewGmail(c)
+//	con := gworkspace.NewContacts(c)
 //
 // cfg.Scopes determines which Workspace APIs are accessible. Assemble the
 // scope list from the gworkspace.*RequiredScopes variables, e.g.:
 //
 //	cfg.Scopes = append(gworkspace.CalendarRequiredScopes, gworkspace.GmailRequiredScopes...)
-package auth
+package gworkspace
 
 import (
 	"context"
@@ -19,31 +20,30 @@ import (
 	"strings"
 
 	"golang.org/x/oauth2"
-
-	"go.naturallyfunny.dev/gworkspace"
 )
 
 // Client holds an *oauth2.Config and a TokenStore; it builds a fresh token
 // source per request from the owner's stored refresh token.
-// Client implements gworkspace.Auth.
+// Client implements Auth.
 type Client struct {
 	tokenStore TokenStore
 	oauth2Cfg  *oauth2.Config
 }
-var _ gworkspace.Auth = (*Client)(nil)
+
+var _ Auth = (*Client)(nil)
 
 // TokenStore persists Google Workspace OAuth refresh tokens keyed by owner.
 // Implement this interface to provide your own storage backend.
-// GetRefreshToken must return gworkspace.ErrNotConnected when no token exists
+// GetRefreshToken must return ErrNotConnected when no token exists
 // for the owner. postgres.TokenStore in this module satisfies it.
 type TokenStore interface {
 	GetRefreshToken(ctx context.Context, owner string) (string, error)
 	SaveRefreshToken(ctx context.Context, owner, refreshToken string) error
 }
 
-// New builds a Client. cfg must carry the Google endpoint and the combined
+// NewClient builds a Client. cfg must carry the Google endpoint and the combined
 // scope list for all Workspace APIs the consumer will use.
-func New(tokenStore TokenStore, cfg *oauth2.Config) *Client {
+func NewClient(tokenStore TokenStore, cfg *oauth2.Config) *Client {
 	return &Client{tokenStore: tokenStore, oauth2Cfg: cfg}
 }
 
@@ -72,7 +72,7 @@ func (c *Client) AuthURL(state string) string {
 // ErrMissingScopes is returned by Exchange when Google did not grant all scopes
 // that were requested in cfg.Scopes — usually because the user deselected some
 // permissions on the consent screen. Trigger a new OAuth flow to re-request.
-var ErrMissingScopes = errors.New("gworkspace/auth: google did not grant all requested scopes")
+var ErrMissingScopes = errors.New("gworkspace: google did not grant all requested scopes")
 
 // Exchange completes the OAuth flow by trading the authorization code from the
 // Google callback for tokens, returning the refresh token to persist via
@@ -84,7 +84,7 @@ func (c *Client) Exchange(ctx context.Context, code string) (string, error) {
 		return "", fmt.Errorf("exchange code: %w", err)
 	}
 	if token.RefreshToken == "" {
-		return "", errors.New("gworkspace/auth: exchange returned no refresh token")
+		return "", errors.New("gworkspace: exchange returned no refresh token")
 	}
 	if len(c.oauth2Cfg.Scopes) > 0 {
 		granted := strings.Fields(fmt.Sprintf("%s", token.Extra("scope")))
@@ -106,8 +106,8 @@ func (c *Client) Connect(ctx context.Context, owner, code string) error {
 }
 
 // TokenSource resolves the owner's refresh token and returns an oauth2.TokenSource
-// that refreshes access tokens on demand. Returns gworkspace.ErrNotConnected
-// when the owner has not connected. TokenSource implements gworkspace.Auth.
+// that refreshes access tokens on demand. Returns ErrNotConnected
+// when the owner has not connected. TokenSource implements Auth.
 func (c *Client) TokenSource(ctx context.Context, owner string) (oauth2.TokenSource, error) {
 	refreshToken, err := c.tokenStore.GetRefreshToken(ctx, owner)
 	if err != nil {

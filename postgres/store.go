@@ -1,5 +1,5 @@
 // Package postgres provides a PostgreSQL-backed implementation of
-// auth.TokenStore over a pgx connection pool.
+// gworkspace.TokenStore over a pgx connection pool.
 package postgres
 
 import (
@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"go.naturallyfunny.dev/gworkspace"
-	"go.naturallyfunny.dev/gworkspace/auth"
 )
 
 //go:embed migrations
@@ -148,4 +147,4 @@ func (s *TokenStore) validateSchema(ctx context.Context) error {
 	return nil
 }
 
-var _ auth.TokenStore = (*TokenStore)(nil)
+var _ gworkspace.TokenStore = (*TokenStore)(nil)

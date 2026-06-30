@@ -1,17 +1,3 @@
-// Package gworkspace is a reusable client for a user's Google Workspace:
-// callers reach Calendar, Gmail, and Contacts by their own opaque owner string.
-//
-// One OAuth connect per user covers the whole Workspace — Calendar, Gmail, and
-// Contacts share a single refresh token. The consumer assembles the scope list
-// from whichever *RequiredScopes vars match the capabilities they use:
-//
-//	cfg := &oauth2.Config{
-//	    Scopes: append(gworkspace.CalendarRequiredScopes, gworkspace.GmailRequiredScopes...),
-//	    ...
-//	}
-//	a   := auth.New(store, cfg)
-//	cal, err := gworkspace.NewCalendar(a)
-//	gm,  err := gworkspace.NewGmail(a)
 package gworkspace
 
 import (
@@ -34,7 +20,7 @@ type Auth interface {
 
 // ErrNotConnected is returned when the owner has not completed the OAuth
 // connect flow and therefore has no stored refresh token. Route the user
-// through auth.Client.AuthURL / auth.Client.Connect to resolve it.
+// through Client.AuthURL / Client.Connect to resolve it.
 var ErrNotConnected = errors.New("gworkspace: user not connected")
 
 // checkScopes returns an error if have does not contain every scope in need.
