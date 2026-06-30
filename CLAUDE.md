@@ -10,34 +10,39 @@ owner-scoped, consumer-defined interface).
 
 1. **Nol coupling ke aplikasi konsumen.** Tidak ada referensi ke aplikasi
    atau identitas app apa pun. User = `owner string` opaque.
-2. **`TokenStore` consumer-defined interface** di `client.go`. Library tidak bangun
+2. **`TokenStore` consumer-defined interface** di `auth/client.go`. Library tidak bangun
    credential atau pool DB sendiri — semua via DI di `New`. Implementasi Postgres
-   di subpackage `postgres`.
+   di subpackage `auth/postgres`.
 3. **Satu refresh token per user untuk seluruh Workspace** (scope gabungan
    `RequiredScopes`). Bukan satu token per API.
-4. **OAuth refresh per-request** (`TokenSourceFor` → `calendarFor`/`gmailFor`/`peopleFor` di subpackage).
-5. **`ErrNotConnected`** dari `TokenStore.GetRefreshToken`, di-surface oleh `Client`.
+4. **OAuth refresh per-request** (`TokenSource` → `calendarFor`/`gmailFor`/`peopleFor`).
+5. **`ErrNotConnected`** dari `TokenStore.GetRefreshToken`, di-surface oleh `auth.Client`.
+   Didefinisikan di root package (`auth.go`), bukan di `auth/`.
 6. Method mengembalikan **tipe domain package ini** (`Event`, `Message`, `Label`,
    `Contact`) — bukan tipe mentah `google.golang.org/api/...`.
+7. **Error handling: tiap method urus sendiri** via `fmt.Errorf("op: %w", err)`.
+   Tidak ada helper wrapping terpusat. Consumer yang perlu cek kode HTTP pakai
+   `errors.As(err, &googleapi.Error{})` langsung — library tidak sembunyikan itu.
 
 ## Struktur
 
 ```
-client.go       Client, Connector, TokenStore, ErrNotConnected/ErrRateLimited,
-                RequiredScopes, New, AuthURL/Exchange/Connect, TokenSourceFor, WrapError
-calendar/       Service, Event/EventQuery/EventInput, GetEvents, AddEvent
-gmail/          Service, Message/Label, ReadMessages, SendEmail, GetLabels,
-                ApplyLabel, CreateLabel, GetMessagesByLabel
-contact/        Service, Contact/ContactInput, GetContacts, AddContact
-postgres/       Store (TokenStore di atas Querier), NewStore/WithAutoMigrate, migrations/
+auth.go         Auth interface, ErrNotConnected, checkScopes
+auth/           client.go: Client, TokenStore, ErrMissingScopes, New,
+                  AuthURL/Exchange/Connect, TokenSource
+                postgres/: Store (TokenStore impl), NewStore/WithAutoMigrate, migrations/
+calendar.go     Calendar, Event/EventQuery/EventInput, NewCalendar, GetEvents, AddEvent
+gmail.go        Gmail, Message/Label, NewGmail, ReadMessages, SendEmail, GetLabels,
+                  ApplyLabel, CreateLabel, GetMessagesByLabel
+contact.go      Contacts, Contact/ContactInput, NewContacts, GetContacts, AddContact
 *_test.go       mapping + ErrNotConnected (tanpa network)
 ```
 
 ## OAuth
 
 Konsumen membangun `*oauth2.Config` (Google endpoint + `RequiredScopes`) dan
-mengirimnya ke `New(tokenStore, cfg)`. `AuthURL` me-request `AccessTypeOffline`
-+ `ApprovalForce` agar Google mengembalikan refresh token. Tiap call fitur bikin
+mengirimnya ke `auth.New(store, cfg)`. `AuthURL` me-request `AccessTypeOffline`
++ `prompt=consent` agar Google mengembalikan refresh token. Tiap call fitur bikin
 `*Service` Google baru dari refresh token (per-request, lalu dibuang).
 
 ## Konteks proyek (kenapa repo ini ada)
@@ -50,7 +55,12 @@ Contacts) per-user dengan satu OAuth token. Dirancang sebagai fondasi ADK toolse
 
 Lihat README "Design Decisions": refresh per-request, limit consumer-controlled via
 query structs (zero = no cap, API default applies), refresh token plaintext
-(tanggung jawab konsumen), sentinel minimal. Sengaja — bukan bug.
+(tanggung jawab konsumen). Sengaja — bukan bug.
+
+**Error philosophy:** library tidak wrap atau sembunyikan Google API errors dengan
+sentinel buatan sendiri (dulu ada `WrapError` + `ErrRateLimited` — sudah dihapus).
+Terlalu abstraktif dan tidak idiomatic Go untuk public library. Consumer punya akses
+penuh ke `*googleapi.Error` untuk inspect kode HTTP, message, dll.
 
 ## Verifikasi
 
@@ -59,7 +69,7 @@ query structs (zero = no cap, API default applies), refresh token plaintext
 
 ## Prev session
 
-Perubahan dari sesi terakhir (belum di-commit):
+Perubahan yang sudah ada (belum di-commit):
 
 1. **Rename `ownerID` → `owner` di seluruh permukaan.** Identitas user sengaja
    dinamai `owner` (bukan `ownerID`/`userID`/`subject`): paling general untuk
@@ -67,14 +77,15 @@ Perubahan dari sesi terakhir (belum di-commit):
    — kebetulan ini istilah resmi OAuth2 "resource owner". Suffix `ID` dibuang
    karena menyiratkan indireksi/lookup yang tidak ada. Diterapkan ke semua param
    method, `TokenStore` interface, `postgres` (param Go + kolom DB), migration
-   (`owner text PRIMARY KEY`), dan docs. **Konsistensi dengan tuya/spotify sengaja
-   diabaikan** — keputusan dinilai dari merit, bukan biar seragam.
+   (`owner text PRIMARY KEY`), dan docs.
 2. **`postgres.NewTokenStore`: `validateSchema` hanya jalan saat autoMigrate OFF.**
    Kalau auto-migrate sukses, skema pasti ada — validasi setelahnya redundan.
-   Validasi berguna khusus untuk konsumen yang kelola skema sendiri (fail-fast).
-3. **`validateSchema` cek kolom eksplisit** (`SELECT owner, refresh_token ...
-   LIMIT 0`), bukan cuma keberadaan tabel — tabel-ada-tapi-kolom-salah ikut gagal
-   saat startup.
+3. **`validateSchema` cek kolom eksplisit** (`SELECT owner, refresh_token ... LIMIT 0`),
+   bukan cuma keberadaan tabel.
+4. **Hapus `WrapError` dan `ErrRateLimited`.** Tidak idiomatic untuk public library —
+   error wrapping urusan tiap method sendiri, consumer handle `*googleapi.Error` langsung.
+5. **`ErrNotConnected` dipindah ke root package** (`auth.go`). Sebelumnya salah tempat
+   di `auth/client.go`; root package test files dan `auth/postgres` butuh akses ke sini.
 
 Catatan arah: langkah berikutnya membangun ADK toolset (`gcal`, `gmail`, `contact`)
 mengikuti pola `tuya/toolset.go` — interface narrow sisi konsumen, `forAgent(err)`

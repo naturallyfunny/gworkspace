@@ -1,5 +1,5 @@
 // Package postgres provides a PostgreSQL-backed implementation of
-// gworkspace.TokenStore over a pgx connection pool.
+// auth.TokenStore over a pgx connection pool.
 package postgres
 
 import (
@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"go.naturallyfunny.dev/gworkspace"
+	"go.naturallyfunny.dev/gworkspace/auth"
 )
 
 //go:embed migrations
@@ -72,7 +73,8 @@ func NewTokenStore(ctx context.Context, db Querier, opts ...Option) (*TokenStore
 func (s *TokenStore) GetRefreshToken(ctx context.Context, owner string) (string, error) {
 	var token string
 	err := s.db.QueryRow(ctx,
-		`SELECT refresh_token FROM gworkspace_tokens WHERE owner = $1`, owner,
+		`SELECT refresh_token FROM gworkspace_tokens WHERE owner = $1`,
+		owner,
 	).Scan(&token)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -134,9 +136,7 @@ func (s *TokenStore) migrate(ctx context.Context) error {
 // turning a misconfigured database into a clear startup error instead of a
 // confusing one on the first GetRefreshToken.
 func (s *TokenStore) validateSchema(ctx context.Context) error {
-	var (
-		owner, refreshToken string
-	)
+	var owner, refreshToken string
 	err := s.db.QueryRow(ctx,
 		`SELECT owner, refresh_token FROM gworkspace_tokens LIMIT 0`,
 	).Scan(&owner, &refreshToken)
@@ -148,4 +148,4 @@ func (s *TokenStore) validateSchema(ctx context.Context) error {
 	return nil
 }
 
-var _ gworkspace.TokenStore = (*TokenStore)(nil)
+var _ auth.TokenStore = (*TokenStore)(nil)

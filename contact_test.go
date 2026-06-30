@@ -1,4 +1,4 @@
-package contact
+package gworkspace
 
 import (
 	"context"
@@ -6,33 +6,34 @@ import (
 	"reflect"
 	"testing"
 
-	"golang.org/x/oauth2"
 	peoplev1 "google.golang.org/api/people/v1"
-
-	"go.naturallyfunny.dev/gworkspace"
 )
 
-type fakeConnector struct{ err error }
-
-func (f *fakeConnector) TokenSourceFor(_ context.Context, _ string) (oauth2.TokenSource, error) {
-	return nil, f.err
-}
-
-func TestNotConnectedPropagates(t *testing.T) {
-	svc := New(&fakeConnector{err: gworkspace.ErrNotConnected})
+func TestContactsNotConnectedPropagates(t *testing.T) {
+	con, err := NewContacts(&fakeAuth{err: ErrNotConnected, scopes: ContactsRequiredScopes})
+	if err != nil {
+		t.Fatalf("NewContacts: %v", err)
+	}
 	ctx := context.Background()
 
 	tests := []struct {
 		name string
 		call func() error
 	}{
-		{"GetContacts", func() error { _, err := svc.GetContacts(ctx, "owner", ContactQuery{}); return err }},
-		{"AddContact", func() error { _, err := svc.AddContact(ctx, "owner", ContactInput{}); return err }},
+		{"GetContacts", func() error { _, err := con.GetContacts(ctx, "owner", ContactQuery{}); return err }},
+		{"AddContact", func() error { _, err := con.AddContact(ctx, "owner", ContactInput{}); return err }},
 	}
 	for _, tt := range tests {
-		if err := tt.call(); !errors.Is(err, gworkspace.ErrNotConnected) {
+		if err := tt.call(); !errors.Is(err, ErrNotConnected) {
 			t.Errorf("%s err = %v, want ErrNotConnected", tt.name, err)
 		}
+	}
+}
+
+func TestNewContactsMissingScopes(t *testing.T) {
+	_, err := NewContacts(&fakeAuth{scopes: []string{}})
+	if err == nil {
+		t.Error("NewContacts with empty scopes should return error")
 	}
 }
 

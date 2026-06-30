@@ -1,16 +1,18 @@
-// Package contact provides Google Contacts access for a Workspace owner.
-// Construct a Service with a gworkspace.Connector (typically *gworkspace.Client)
-// and call its methods; OAuth tokens are resolved per request.
-package contact
+package gworkspace
 
 import (
 	"context"
+	"fmt"
 
 	peoplev1 "google.golang.org/api/people/v1"
 	"google.golang.org/api/option"
-
-	"go.naturallyfunny.dev/gworkspace"
 )
+
+// ContactsRequiredScopes are the OAuth scopes needed for all Contacts methods.
+// Include these in cfg.Scopes when building an auth.Client used with NewContacts.
+var ContactsRequiredScopes = []string{
+	peoplev1.ContactsScope,
+}
 
 const personFields = "names,emailAddresses,phoneNumbers"
 
@@ -20,14 +22,18 @@ type ContactQuery struct {
 	Limit int
 }
 
-// Service provides Google Contacts access for a Workspace owner.
-type Service struct {
-	conn gworkspace.Connector
+// Contacts provides Google Contacts access for a Workspace owner.
+type Contacts struct {
+	auth Auth
 }
 
-// New builds a Service that uses conn to obtain per-owner OAuth tokens.
-func New(conn gworkspace.Connector) *Service {
-	return &Service{conn: conn}
+// NewContacts builds a Contacts client that uses auth to obtain per-owner OAuth tokens.
+// Returns an error if auth does not carry ContactsRequiredScopes.
+func NewContacts(auth Auth) (*Contacts, error) {
+	if err := checkScopes(auth.Scopes(), ContactsRequiredScopes); err != nil {
+		return nil, err
+	}
+	return &Contacts{auth: auth}, nil
 }
 
 // Contact is a person in the owner's Google Contacts. ResourceName is the People
@@ -47,9 +53,9 @@ type ContactInput struct {
 }
 
 // GetContacts returns the owner's contacts.
-// Returns gworkspace.ErrNotConnected if the owner has not connected.
-func (s *Service) GetContacts(ctx context.Context, owner string, q ContactQuery) ([]Contact, error) {
-	svc, err := s.peopleFor(ctx, owner)
+// Returns ErrNotConnected if the owner has not connected.
+func (c *Contacts) GetContacts(ctx context.Context, owner string, q ContactQuery) ([]Contact, error) {
+	svc, err := c.peopleFor(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +67,7 @@ func (s *Service) GetContacts(ctx context.Context, owner string, q ContactQuery)
 	}
 	res, err := call.Do()
 	if err != nil {
-		return nil, gworkspace.WrapError("get contacts", err)
+		return nil, fmt.Errorf("get contacts: %w", err)
 	}
 	contacts := make([]Contact, 0, len(res.Connections))
 	for _, p := range res.Connections {
@@ -71,9 +77,9 @@ func (s *Service) GetContacts(ctx context.Context, owner string, q ContactQuery)
 }
 
 // AddContact creates a contact for the owner and returns it.
-// Returns gworkspace.ErrNotConnected if the owner has not connected.
-func (s *Service) AddContact(ctx context.Context, owner string, in ContactInput) (Contact, error) {
-	svc, err := s.peopleFor(ctx, owner)
+// Returns ErrNotConnected if the owner has not connected.
+func (c *Contacts) AddContact(ctx context.Context, owner string, in ContactInput) (Contact, error) {
+	svc, err := c.peopleFor(ctx, owner)
 	if err != nil {
 		return Contact{}, err
 	}
@@ -94,13 +100,13 @@ func (s *Service) AddContact(ctx context.Context, owner string, in ContactInput)
 	// would yield an empty Name on the created contact.
 	created, err := svc.People.CreateContact(person).PersonFields(personFields).Context(ctx).Do()
 	if err != nil {
-		return Contact{}, gworkspace.WrapError("add contact", err)
+		return Contact{}, fmt.Errorf("add contact: %w", err)
 	}
 	return contactFrom(created), nil
 }
 
-func (s *Service) peopleFor(ctx context.Context, owner string) (*peoplev1.Service, error) {
-	ts, err := s.conn.TokenSourceFor(ctx, owner)
+func (c *Contacts) peopleFor(ctx context.Context, owner string) (*peoplev1.Service, error) {
+	ts, err := c.auth.TokenSource(ctx, owner)
 	if err != nil {
 		return nil, err
 	}

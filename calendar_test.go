@@ -1,4 +1,4 @@
-package calendar
+package gworkspace
 
 import (
 	"context"
@@ -9,31 +9,45 @@ import (
 
 	"golang.org/x/oauth2"
 	calendarv3 "google.golang.org/api/calendar/v3"
-
-	"go.naturallyfunny.dev/gworkspace"
 )
 
-type fakeConnector struct{ err error }
+// fakeAuth is a test double for gworkspace.Auth, shared across test files.
+type fakeAuth struct {
+	err    error
+	scopes []string
+}
 
-func (f *fakeConnector) TokenSourceFor(_ context.Context, _ string) (oauth2.TokenSource, error) {
+func (f *fakeAuth) TokenSource(_ context.Context, _ string) (oauth2.TokenSource, error) {
 	return nil, f.err
 }
 
-func TestNotConnectedPropagates(t *testing.T) {
-	svc := New(&fakeConnector{err: gworkspace.ErrNotConnected})
+func (f *fakeAuth) Scopes() []string { return f.scopes }
+
+func TestCalendarNotConnectedPropagates(t *testing.T) {
+	cal, err := NewCalendar(&fakeAuth{err: ErrNotConnected, scopes: CalendarRequiredScopes})
+	if err != nil {
+		t.Fatalf("NewCalendar: %v", err)
+	}
 	ctx := context.Background()
 
 	tests := []struct {
 		name string
 		call func() error
 	}{
-		{"GetEvents", func() error { _, err := svc.GetEvents(ctx, "owner", EventQuery{}); return err }},
-		{"AddEvent", func() error { _, err := svc.AddEvent(ctx, "owner", EventInput{}); return err }},
+		{"GetEvents", func() error { _, err := cal.GetEvents(ctx, "owner", EventQuery{}); return err }},
+		{"AddEvent", func() error { _, err := cal.AddEvent(ctx, "owner", EventInput{}); return err }},
 	}
 	for _, tt := range tests {
-		if err := tt.call(); !errors.Is(err, gworkspace.ErrNotConnected) {
+		if err := tt.call(); !errors.Is(err, ErrNotConnected) {
 			t.Errorf("%s err = %v, want ErrNotConnected", tt.name, err)
 		}
+	}
+}
+
+func TestNewCalendarMissingScopes(t *testing.T) {
+	_, err := NewCalendar(&fakeAuth{scopes: []string{}})
+	if err == nil {
+		t.Error("NewCalendar with empty scopes should return error")
 	}
 }
 

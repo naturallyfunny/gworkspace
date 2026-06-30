@@ -1,28 +1,34 @@
-// Package calendar provides Google Calendar access for a Workspace owner.
-// Construct a Service with a gworkspace.Connector (typically *gworkspace.Client)
-// and call its methods; OAuth tokens are resolved per request.
-package calendar
+package gworkspace
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	calendarv3 "google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"
-
-	"go.naturallyfunny.dev/gworkspace"
 )
+
+// CalendarRequiredScopes are the OAuth scopes needed for all Calendar methods.
+// Include these in cfg.Scopes when building an auth.Client used with NewCalendar.
+var CalendarRequiredScopes = []string{
+	calendarv3.CalendarScope,
+}
 
 const defaultCalendarID = "primary"
 
-// Service provides Google Calendar access for a Workspace owner.
-type Service struct {
-	conn gworkspace.Connector
+// Calendar provides Google Calendar access for a Workspace owner.
+type Calendar struct {
+	auth Auth
 }
 
-// New builds a Service that uses conn to obtain per-owner OAuth tokens.
-func New(conn gworkspace.Connector) *Service {
-	return &Service{conn: conn}
+// NewCalendar builds a Calendar that uses auth to obtain per-owner OAuth tokens.
+// Returns an error if auth does not carry CalendarRequiredScopes.
+func NewCalendar(auth Auth) (*Calendar, error) {
+	if err := checkScopes(auth.Scopes(), CalendarRequiredScopes); err != nil {
+		return nil, err
+	}
+	return &Calendar{auth: auth}, nil
 }
 
 // Event is a calendar event. Start and End are the event's instants; for all-day
@@ -65,9 +71,9 @@ type EventInput struct {
 }
 
 // GetEvents returns events for the owner matching q, ordered by start time.
-// Returns gworkspace.ErrNotConnected if the owner has not connected.
-func (s *Service) GetEvents(ctx context.Context, owner string, q EventQuery) ([]Event, error) {
-	svc, err := s.calendarFor(ctx, owner)
+// Returns ErrNotConnected if the owner has not connected.
+func (c *Calendar) GetEvents(ctx context.Context, owner string, q EventQuery) ([]Event, error) {
+	svc, err := c.calendarFor(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +107,7 @@ func (s *Service) GetEvents(ctx context.Context, owner string, q EventQuery) ([]
 
 	res, err := call.Do()
 	if err != nil {
-		return nil, gworkspace.WrapError("get events", err)
+		return nil, fmt.Errorf("get events: %w", err)
 	}
 	events := make([]Event, 0, len(res.Items))
 	for _, item := range res.Items {
@@ -111,9 +117,9 @@ func (s *Service) GetEvents(ctx context.Context, owner string, q EventQuery) ([]
 }
 
 // AddEvent creates an event for the owner and returns the created event.
-// Returns gworkspace.ErrNotConnected if the owner has not connected.
-func (s *Service) AddEvent(ctx context.Context, owner string, in EventInput) (Event, error) {
-	svc, err := s.calendarFor(ctx, owner)
+// Returns ErrNotConnected if the owner has not connected.
+func (c *Calendar) AddEvent(ctx context.Context, owner string, in EventInput) (Event, error) {
+	svc, err := c.calendarFor(ctx, owner)
 	if err != nil {
 		return Event{}, err
 	}
@@ -139,13 +145,13 @@ func (s *Service) AddEvent(ctx context.Context, owner string, in EventInput) (Ev
 
 	created, err := svc.Events.Insert(calendarID, event).Context(ctx).Do()
 	if err != nil {
-		return Event{}, gworkspace.WrapError("add event", err)
+		return Event{}, fmt.Errorf("add event: %w", err)
 	}
 	return eventFrom(created), nil
 }
 
-func (s *Service) calendarFor(ctx context.Context, owner string) (*calendarv3.Service, error) {
-	ts, err := s.conn.TokenSourceFor(ctx, owner)
+func (c *Calendar) calendarFor(ctx context.Context, owner string) (*calendarv3.Service, error) {
+	ts, err := c.auth.TokenSource(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -188,4 +194,3 @@ func parseEventTime(dt *calendarv3.EventDateTime) time.Time {
 	}
 	return time.Time{}
 }
-

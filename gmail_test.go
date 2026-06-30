@@ -1,4 +1,4 @@
-package gmail
+package gworkspace
 
 import (
 	"context"
@@ -7,37 +7,38 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/oauth2"
 	gmailv1 "google.golang.org/api/gmail/v1"
-
-	"go.naturallyfunny.dev/gworkspace"
 )
 
-type fakeConnector struct{ err error }
-
-func (f *fakeConnector) TokenSourceFor(_ context.Context, _ string) (oauth2.TokenSource, error) {
-	return nil, f.err
-}
-
-func TestNotConnectedPropagates(t *testing.T) {
-	svc := New(&fakeConnector{err: gworkspace.ErrNotConnected})
+func TestGmailNotConnectedPropagates(t *testing.T) {
+	gm, err := NewGmail(&fakeAuth{err: ErrNotConnected, scopes: GmailRequiredScopes})
+	if err != nil {
+		t.Fatalf("NewGmail: %v", err)
+	}
 	ctx := context.Background()
 
 	tests := []struct {
 		name string
 		call func() error
 	}{
-		{"ReadMessages", func() error { _, err := svc.ReadMessages(ctx, "owner", MessageQuery{}); return err }},
-		{"GetMessagesByLabel", func() error { _, err := svc.GetMessagesByLabel(ctx, "owner", "INBOX", LabelQuery{}); return err }},
-		{"SendEmail", func() error { return svc.SendEmail(ctx, "owner", "to@example.com", "s", "b") }},
-		{"GetLabels", func() error { _, err := svc.GetLabels(ctx, "owner"); return err }},
-		{"CreateLabel", func() error { _, err := svc.CreateLabel(ctx, "owner", "name"); return err }},
-		{"ApplyLabel", func() error { return svc.ApplyLabel(ctx, "owner", "msg", "lbl") }},
+		{"ReadMessages", func() error { _, err := gm.ReadMessages(ctx, "owner", MessageQuery{}); return err }},
+		{"GetMessagesByLabel", func() error { _, err := gm.GetMessagesByLabel(ctx, "owner", "INBOX", LabelQuery{}); return err }},
+		{"SendEmail", func() error { return gm.SendEmail(ctx, "owner", "to@example.com", "s", "b") }},
+		{"GetLabels", func() error { _, err := gm.GetLabels(ctx, "owner"); return err }},
+		{"CreateLabel", func() error { _, err := gm.CreateLabel(ctx, "owner", "name"); return err }},
+		{"ApplyLabel", func() error { return gm.ApplyLabel(ctx, "owner", "msg", "lbl") }},
 	}
 	for _, tt := range tests {
-		if err := tt.call(); !errors.Is(err, gworkspace.ErrNotConnected) {
+		if err := tt.call(); !errors.Is(err, ErrNotConnected) {
 			t.Errorf("%s err = %v, want ErrNotConnected", tt.name, err)
 		}
+	}
+}
+
+func TestNewGmailMissingScopes(t *testing.T) {
+	_, err := NewGmail(&fakeAuth{scopes: []string{}})
+	if err == nil {
+		t.Error("NewGmail with empty scopes should return error")
 	}
 }
 
