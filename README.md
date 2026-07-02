@@ -6,8 +6,9 @@ sebagai interface-based library agar dapat dipakai lintas project, tidak terikat
 satu database atau satu aplikasi.
 
 Satu OAuth connect per user mencakup seluruh Workspace: Calendar, Gmail, dan
-Contacts berbagi satu refresh token yang di-grant terhadap gabungan
-`RequiredScopes`.
+Contacts berbagi satu refresh token yang di-grant terhadap gabungan scope
+per-domain (`CalendarRequiredScopes` + `GmailRequiredScopes` +
+`ContactsRequiredScopes`, sesuai kebutuhan konsumen).
 
 ## Tujuan Pemakaian (baca sebelum audit)
 
@@ -20,17 +21,21 @@ high-throughput.** Lihat "Design Decisions".
 ## Struktur
 
 ```
-client.go       Client, Connector, TokenStore, ErrNotConnected/ErrRateLimited,
-                RequiredScopes, New, OAuth (AuthURL/Exchange/Connect),
-                TokenSourceFor, WrapError, sentinelFor
-calendar/       Service, Event/EventQuery/EventInput, GetEvents, AddEvent
-gmail/          Service, Message/Label, MessageQuery/LabelQuery,
+client.go       Client, TokenStore, ErrNotConnected/ErrMissingScopes, checkScopes,
+                NewClient, OAuth (AuthURL/Exchange/Connect), TokenSource
+calendar.go     Calendar, CalendarRequiredScopes, Event/EventQuery/EventInput,
+                NewCalendar, GetEvents, AddEvent
+gmail.go        Gmail, GmailRequiredScopes, Message/Label, MessageQuery/LabelQuery,
                 ReadMessages, SendEmail, GetLabels, ApplyLabel, CreateLabel,
                 GetMessagesByLabel
-contact/        Service, Contact/ContactInput/ContactQuery, GetContacts, AddContact
+contact.go      Contacts, ContactsRequiredScopes, Contact/ContactInput/ContactQuery,
+                GetContacts, AddContact
 postgres/
-  store.go      implementasi TokenStore di atas Querier (pgxpool), NewStore/WithAutoMigrate
+  store.go      implementasi TokenStore di atas Querier (pgxpool), NewTokenStore/WithAutoMigrate
   migrations/   SQL files, di-embed via //go:embed
+firestore/
+  store.go      implementasi TokenStore di atas Cloud Firestore (satu dokumen per owner,
+                doc ID = owner), NewTokenStore/WithCollection — tanpa migrasi
 ```
 
 ## Cara Pakai
@@ -41,23 +46,37 @@ cfg := &oauth2.Config{
     ClientSecret: clientSecret,
     RedirectURL:  redirectURL,
     Endpoint:     google.Endpoint,
-    Scopes:       gworkspace.RequiredScopes,
+    // Gabungkan scope domain yang dipakai; konstruktor domain fail-fast
+    // kalau ada yang kurang.
+    Scopes: slices.Concat(gworkspace.CalendarRequiredScopes,
+        gworkspace.GmailRequiredScopes, gworkspace.ContactsRequiredScopes),
 }
-store, err := postgres.NewStore(ctx, pool, postgres.WithAutoMigrate())
-client := gworkspace.New(store, cfg)
+store, err := postgres.NewTokenStore(ctx, pool, postgres.WithAutoMigrate())
+client := gworkspace.NewClient(store, cfg)
+
+// Alternatif: token di Cloud Firestore (alias salah satu import firestore;
+// tidak ada migrasi):
+//
+//	import (
+//	    gcfs "cloud.google.com/go/firestore"
+//	    "go.naturallyfunny.dev/gworkspace/firestore"
+//	)
+//
+//	fs, err := gcfs.NewClient(ctx, projectID)
+//	store := firestore.NewTokenStore(fs)
 
 // Connect flow (sekali per user):
-url := client.AuthURL(state)        // arahkan user ke sini
-err := client.Connect(ctx, owner, code) // di callback
+url := client.AuthURL(state)           // arahkan user ke sini
+err = client.Connect(ctx, owner, code) // di callback
 
 // Pemakaian:
-calSvc     := calendar.New(client)
-gmailSvc   := gmail.New(client)
-contactSvc := contact.New(client)
+cal, err := gworkspace.NewCalendar(client)
+gm, err  := gworkspace.NewGmail(client)
+con, err := gworkspace.NewContacts(client)
 
-events, err   := calSvc.GetEvents(ctx, owner, calendar.EventQuery{Query: "standup"})
-err            = gmailSvc.SendEmail(ctx, owner, "bob@example.com", "Hi", "body")
-contacts, err := contactSvc.GetContacts(ctx, owner, contact.ContactQuery{})
+events, err   := cal.GetEvents(ctx, owner, gworkspace.EventQuery{Query: "standup"})
+err            = gm.SendEmail(ctx, owner, "bob@example.com", "Hi", "body")
+contacts, err := con.GetContacts(ctx, owner, gworkspace.ContactQuery{})
 ```
 
 User belum connect → method mengembalikan `gworkspace.ErrNotConnected`
@@ -65,7 +84,7 @@ User belum connect → method mengembalikan `gworkspace.ErrNotConnected`
 
 ## Migrations
 
-Dijalankan **lewat koneksi yang sama** yang di-inject ke `NewStore` (tanpa DSN,
+Dijalankan **lewat koneksi yang sama** yang di-inject ke `NewTokenStore` (tanpa DSN,
 tanpa `golang-migrate`): tiap file `migrations/*.sql` di-`Exec` urut nama. Karena
 itu setiap statement **wajib idempoten** (`IF NOT EXISTS` / `IF EXISTS`) — file
 di-apply ulang setiap start. Naming: `000N_deskripsi.up.sql`. Tidak ada `.down.sql`
@@ -90,14 +109,18 @@ Trade-off berikut ditimbang sadar untuk use-case "tool AI agent, traffic rendah"
 - **Refresh token plaintext** (`postgres/store.go`). Enkripsi-at-rest adalah
   tanggung jawab **konsumen** lewat implementasi `TokenStore`-nya sendiri, bukan
   library.
-- **Sentinel minimal.** Hanya `ErrNotConnected` dan `ErrRateLimited` (HTTP 429).
-  Sentinel lain (not found, dst) ditambah saat ada konsumen yang perlu branch.
+- **Sentinel minimal.** Hanya `ErrNotConnected` dan `ErrMissingScopes`. Library
+  tidak membungkus error Google API dengan sentinel buatan sendiri — consumer
+  yang perlu branch pada kode HTTP inspect langsung via
+  `errors.As(err, &googleapi.Error{})`.
 
 ## Conventions
 
 - `TokenStore` interface didefinisikan di `client.go` — consumer-defined interface.
-- `postgres.NewStore(ctx, db, opts...)` — ambil `Querier` sempit (pgxpool
+- `postgres.NewTokenStore(ctx, db, opts...)` — ambil `Querier` sempit (pgxpool
   memenuhinya), migrasi lewat koneksi itu sendiri. Tanpa DSN kedua.
+- `firestore.NewTokenStore(client, opts...)` — di atas `*firestore.Client` milik
+  konsumen; doc ID = owner, koleksi via `WithCollection`.
 - Tidak ada `pkg/` — flat structure.
 - Nol referensi ke aplikasi konsumen apa pun; user diidentifikasi lewat
   `owner string` opaque.

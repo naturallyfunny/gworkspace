@@ -13,11 +13,12 @@ owner-scoped, consumer-defined interface).
 2. **`TokenStore` consumer-defined interface** di `client.go`. Library tidak bangun
    credential atau pool DB sendiri — semua via DI di `NewClient`. Implementasi Postgres
    di subpackage `postgres/`.
-3. **Satu refresh token per user untuk seluruh Workspace** (scope gabungan
-   `RequiredScopes`). Bukan satu token per API.
+3. **Satu refresh token per user untuk seluruh Workspace** (gabungan scope
+   per-domain: `CalendarRequiredScopes`/`GmailRequiredScopes`/`ContactsRequiredScopes`).
+   Bukan satu token per API.
 4. **OAuth refresh per-request** (`TokenSource` → `calendarFor`/`gmailFor`/`peopleFor`).
 5. **`ErrNotConnected`** dari `TokenStore.GetRefreshToken`, di-surface oleh `Client`.
-   Didefinisikan di `auth.go` (root package).
+   Didefinisikan di `client.go` (root package).
 6. Method mengembalikan **tipe domain package ini** (`Event`, `Message`, `Label`,
    `Contact`) — bukan tipe mentah `google.golang.org/api/...`.
 7. **Error handling: tiap method urus sendiri** via `fmt.Errorf("op: %w", err)`.
@@ -27,22 +28,29 @@ owner-scoped, consumer-defined interface).
 ## Struktur
 
 ```
-auth.go         Auth interface, ErrNotConnected, checkScopes
-client.go       Client, TokenStore, ErrMissingScopes, NewClient,
-                  AuthURL/Exchange/Connect, TokenSource
-calendar.go     Calendar, Event/EventQuery/EventInput, NewCalendar, GetEvents, AddEvent
-gmail.go        Gmail, Message/Label, NewGmail, ReadMessages, SendEmail, GetLabels,
-                  ApplyLabel, CreateLabel, GetMessagesByLabel
-contact.go      Contacts, Contact/ContactInput, NewContacts, GetContacts, AddContact
+client.go       Client, TokenStore, ErrNotConnected, ErrMissingScopes, checkScopes,
+                  NewClient, AuthURL/Exchange/Connect, TokenSource
+calendar.go     Calendar, CalendarRequiredScopes, Event/EventQuery/EventInput,
+                  NewCalendar, GetEvents, AddEvent
+gmail.go        Gmail, GmailRequiredScopes, Message/Label, NewGmail, ReadMessages,
+                  SendEmail, GetLabels, ApplyLabel, CreateLabel, GetMessagesByLabel
+contact.go      Contacts, ContactsRequiredScopes, Contact/ContactInput, NewContacts,
+                  GetContacts, AddContact
 postgres/       store.go: TokenStore (gworkspace.TokenStore impl),
                   NewTokenStore/WithAutoMigrate, migrations/
+firestore/      store.go: TokenStore di atas Cloud Firestore (satu dokumen per owner,
+                  doc ID = owner, koleksi gworkspace_tokens / WithCollection),
+                  NewTokenStore(client, opts) — tanpa migrasi, created_at dipertahankan
+                  saat replace (transactional)
 *_test.go       mapping + ErrNotConnected (tanpa network)
 ```
 
 ## OAuth
 
-Konsumen membangun `*oauth2.Config` (Google endpoint + `RequiredScopes`) dan
-mengirimnya ke `gworkspace.NewClient(store, cfg)`. `AuthURL` me-request `AccessTypeOffline`
+Konsumen membangun `*oauth2.Config` (Google endpoint + gabungan `*RequiredScopes`
+domain yang dipakai) dan mengirimnya ke `gworkspace.NewClient(store, cfg)`.
+Konstruktor domain (`NewCalendar` dst) fail-fast via `checkScopes` kalau
+`cfg.Scopes` kurang. `AuthURL` me-request `AccessTypeOffline`
 + `prompt=consent` agar Google mengembalikan refresh token. Tiap call fitur bikin
 `*Service` Google baru dari refresh token (per-request, lalu dibuang).
 
